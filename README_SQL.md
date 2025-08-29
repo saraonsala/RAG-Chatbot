@@ -1,5 +1,3 @@
-# RAG-Chatbot
-My passion project
 # 📚 XXXXX RAG Chatbot Dokumentation (v2025-06-09)
 
 En intelligent RAG-baserad (Retrieval-Augmented Generation) chatbot designad för att ge snabba och relevanta svar baserat på innehållet i lokala dokument (PDF och Excel). Projektet använder lokalt körda språkmodeller (via LM Studio), FAISS för vektorindexering och Sentence-BERT för att möjliggöra effektiv informationshämtning.

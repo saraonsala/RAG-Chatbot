@@ -1,0 +1,22 @@
+# --- Kärnbibliotek för NLP och Vektordatabaser ---
+sentence-transformers
+faiss-cpu
+tiktoken
+
+# --- Bibliotek för Datainhämtning och Bearbetning ---
+PyMuPDF
+pandas
+
+# --- Bibliotek för Databaskommunikation ---
+pyodbc
+
+# --- Bibliotek för API-server och HTTP-anrop ---
+Flask
+Flask-CORS
+requests
+
+# --- Övriga Nödvändiga Bibliotek ---
+numpy
+# nltk  # Uncomment if you need NLTK
+
+

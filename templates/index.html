@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enkel RAG Chatbot</title>
+    <style>
+        :root {
+            --primary-color: #005f9e;
+            --secondary-color: #f0f4f8;
+            --user-bubble-color: #d1e7fd;
+            --bot-bubble-color: #e2e3e5;
+            --text-color: #333;
+            --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--secondary-color);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+
+        .chat-container {
+            width: 90%;
+            max-width: 700px;
+            height: 90vh;
+            max-height: 800px;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 16px;
+            font-size: 1.2rem;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        .message-area {
+            flex-grow: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 10px 15px;
+            border-radius: 18px;
+            margin-bottom: 10px;
+            line-height: 1.5;
+            word-wrap: break-word;
+        }
+
+        .message.user {
+            background-color: var(--user-bubble-color);
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.bot {
+            background-color: var(--bot-bubble-color);
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+        }
+
+        .message.thinking {
+            background-color: transparent;
+            color: #6c757d;
+            font-style: italic;
+            align-self: flex-start;
+        }
+        
+        .message pre { /* För att hantera källor och radbrytningar */
+            white-space: pre-wrap;       
+            word-wrap: break-word;      
+            font-family: inherit;
+            margin: 0;
+        }
+
+        .input-area {
+            display: flex;
+            padding: 15px;
+            border-top: 1px solid #e0e0e0;
+            background-color: #fff;
+        }
+
+        #user-input {
+            flex-grow: 1;
+            padding: 10px;
+            border-radius: 20px;
+            border: 1px solid #ccc;
+            font-size: 1rem;
+            margin-right: 10px;
+            resize: none; /* Förhindra ändring av storlek på textarea */
+            height: 24px;
+            line-height: 24px;
+            overflow-y: hidden; /* Dölj scrollbar initialt */
+        }
+        
+        #user-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(0, 95, 158, 0.2);
+        }
+
+        #send-button {
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: none;
+            background-color: var(--primary-color);
+            color: white;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        #send-button:hover {
+            background-color: #004c7d;
+        }
+        
+        #send-button:disabled {
+            background-color: #a0a0a0;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="chat-container">
+        <header>Chattbot</header>
+        <div class="message-area" id="message-area">
+            <!-- Chattmeddelanden kommer att läggas till här -->
+        </div>
+        <div class="input-area">
+            <textarea id="user-input" placeholder="Skriv din fråga här..." rows="1"></textarea>
+            <button id="send-button">Skicka</button>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            const messageArea = document.getElementById("message-area");
+            const userInput = document.getElementById("user-input");
+            const sendButton = document.getElementById("send-button");
+
+            // --- Konfiguration ---
+            // Anpassa denna URL om din Flask-backend körs på en annan port/host
+            const API_URL = "http://localhost:5000/chat";
+            const THINKING_DELAY_MS = 3000; // Visa "Tänker..." efter 3 sekunder
+
+            // --- Funktioner ---
+            function addMessage(text, sender) {
+                const messageElement = document.createElement("div");
+                messageElement.classList.add("message", sender); // 'user', 'bot', eller 'thinking'
+
+                // Använd <pre> för att bevara radbrytningar från botens svar (t.ex. källor)
+                const contentElement = document.createElement("pre");
+                contentElement.textContent = text;
+                messageElement.appendChild(contentElement);
+
+                messageArea.appendChild(messageElement);
+                scrollToBottom();
+                return messageElement; // Returnera elementet så vi kan ta bort det
+            }
+
+            function scrollToBottom() {
+                messageArea.scrollTop = messageArea.scrollHeight;
+            }
+
+            function adjustTextareaHeight(textarea) {
+                textarea.style.height = 'auto'; // Återställ höjden
+                textarea.style.height = textarea.scrollHeight + 'px'; // Sätt till scrollhöjden
+            }
+
+            // --- Huvudlogik för att skicka meddelande ---
+            async function sendMessage() {
+                const userMessage = userInput.value.trim();
+                if (!userMessage) return;
+
+                sendButton.disabled = true;
+                addMessage(userMessage, "user");
+                userInput.value = "";
+                adjustTextareaHeight(userInput);
+
+                let thinkingMessageElement = null;
+                const thinkingTimeout = setTimeout(() => {
+                    thinkingMessageElement = addMessage("Tänker...", "thinking");
+                }, THINKING_DELAY_MS);
+
+                try {
+                    const response = await fetch(API_URL, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                        },
+                        body: JSON.stringify({ message: userMessage }),
+                    });
+                    
+                    // När svaret kommer, rensa timeout och ta bort "Tänker..."-meddelandet
+                    clearTimeout(thinkingTimeout);
+                    if (thinkingMessageElement) {
+                        thinkingMessageElement.remove();
+                    }
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP-fel: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    addMessage(data.response, "bot");
+
+                } catch (error) {
+                    console.error("Fel vid anrop till API:", error);
+                    // Rensa "Tänker..."-meddelandet även vid fel
+                    clearTimeout(thinkingTimeout);
+                    if (thinkingMessageElement) {
+                        thinkingMessageElement.remove();
+                    }
+                    addMessage(`Ett fel uppstod: ${error.message}`, "bot");
+                } finally {
+                    // Återaktivera knappen när allt är klart
+                    sendButton.disabled = false;
+                    userInput.focus();
+                }
+            }
+
+            // --- Händelselyssnare ---
+            sendButton.addEventListener("click", sendMessage);
+
+            userInput.addEventListener("keydown", (event) => {
+                // Skicka med Enter, men tillåt Shift+Enter för ny rad
+                if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault(); // Förhindra att en ny rad skapas i textarea
+                    sendMessage();
+                }
+            });
+
+            userInput.addEventListener('input', () => adjustTextareaHeight(userInput));
+
+            // Lägg till ett välkomstmeddelande när sidan laddas
+            addMessage("Välkommen! Hur kan jag hjälpa dig idag?", "bot");
+            userInput.focus();
+        });
+    </script>
+</body>
+</html>
