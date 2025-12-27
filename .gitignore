@@ -5,6 +5,8 @@ __pycache__/
 
 # C extensions
 *.so
+#SQL connection file
+sql/Sql_connection.py
 
 # Distribution / packaging
 .Python
