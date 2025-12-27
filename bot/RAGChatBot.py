@@ -17,33 +17,66 @@ try:
     from sql.database_manager import DatabaseManager
 except ImportError:
     logging.warning("⚠️ RAGChatBot: DatabaseManager-modulen kunde inte importeras. Databasfunktioner kommer inte att fungera. En mock-klass används.")
+
     class DatabaseManager:
+        """Mock-klass för DatabaseManager när den riktiga modulen inte kan importeras."""
+
         def __init__(self, connection_string: Optional[str]):
             self.connection_string = connection_string
+            self._logged_warning = False
             if connection_string:
-                 logging.warning("⚠️ RAGChatBot: DatabaseManager-mocken initierades med en anslutningssträng, men den riktiga modulen importerades inte.")
+                logging.warning(
+                    "⚠️ RAGChatBot: DatabaseManager-mock initierad med anslutningssträng, "
+                    "men den riktiga modulen saknas. Alla DB-operationer kommer att misslyckas."
+                )
+
+        def _log_mock_call(self, method_name: str):
+            """Loggar varning första gången en mock-metod anropas."""
+            if not self._logged_warning:
+                logging.error(
+                    f"❌ RAGChatBot Mock DB: {method_name} anropad men DatabaseManager är en mock. "
+                    f"Installera 'pyodbc' och konfigurera DB_CONNECTION_STRING."
+                )
+                self._logged_warning = True
+
         def execute_query(self, *args, **kwargs) -> Optional[int]:
-             if self.connection_string: logging.error("❌ RAGChatBot Mock DB: execute_query anropad.")
-             return 0
+            self._log_mock_call("execute_query")
+            return None
+
         def execute_insert_and_get_id(self, *args, **kwargs) -> Optional[Any]:
-             if self.connection_string: logging.error("❌ RAGChatBot Mock DB: execute_insert_and_get_id anropad.")
-             return None
+            self._log_mock_call("execute_insert_and_get_id")
+            return None
+
         def fetch_many(self, *args, **kwargs) -> List[Any]:
-             if self.connection_string: logging.error("❌ RAGChatBot Mock DB: fetch_many anropad.")
-             return []
+            self._log_mock_call("fetch_many")
+            return []
+
         def fetch_one(self, *args, **kwargs) -> Optional[Any]:
-             if self.connection_string: logging.error("❌ RAGChatBot Mock DB: fetch_one anropad.")
-             return None
+            self._log_mock_call("fetch_one")
+            return None
+
         def execute_many(self, *args, **kwargs) -> Optional[int]:
-             if self.connection_string: logging.error("❌ RAGChatBot Mock DB: execute_many anropad.")
-             return 0
-        def __enter__(self): return self
-        def __exit__(self, exc_type, exc_val, exc_tb): return False
+            self._log_mock_call("execute_many")
+            return None
+
+        def _validate_identifier(self, identifier: str, identifier_type: str = "identifier") -> str:
+            """Mock-version av identifier validation."""
+            return identifier
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            return False
 
 
 # --- Konfiguration & Loggning ---
 INDEX_ROOT_DIR = "rag_index_storage"
 LOG_FILE = "rag_chatbot.log"
+
+# Security & Validation Constants
+MAX_USER_INPUT_LENGTH = 5000  # Max antal tecken i användarfrågor
+MAX_CONTEXT_LENGTH = 50000     # Max total längd på kontext från dokument
 
 DOCUMENT_INDEX_SUBDIR = "document_index"
 DOC_INDEX_FILENAME = "vector_index.faiss"
@@ -300,7 +333,17 @@ class RAGChatBot:
                             return None, None
 
                         logger.debug(f"Hämtar svar för ChatLogID: {actual_chat_log_id} från DB...")
-                        query = f'SELECT "{self.chatlog_response_col}" FROM "{self.chatlog_table_name}" WHERE "{self.chatlog_id_col}" = ?'
+
+                        # Validera tabell- och kolumnnamn för att förhindra SQL injection
+                        try:
+                            safe_table = self.db_manager._validate_identifier(self.chatlog_table_name, "table")
+                            safe_response_col = self.db_manager._validate_identifier(self.chatlog_response_col, "column")
+                            safe_id_col = self.db_manager._validate_identifier(self.chatlog_id_col, "column")
+                        except (ValueError, AttributeError) as validation_err:
+                            logger.error(f"❌ SQL identifier validation failed: {validation_err}")
+                            return None, None
+
+                        query = f'SELECT "{safe_response_col}" FROM "{safe_table}" WHERE "{safe_id_col}" = ?'
                         try:
                             row = self.db_manager.fetch_one(query, (actual_chat_log_id,))
                             if row and row[0] is not None and str(row[0]).strip():
@@ -321,8 +364,18 @@ class RAGChatBot:
         return None, None
 
     def generate_response(self, user_input: str) -> str:
+        # Validera input
         if not user_input or not user_input.strip():
             return "⚠️ Vänligen skriv en fråga."
+
+        # Begränsa input-längd för att förhindra DoS och överdrivna API-kostnader
+        if len(user_input) > MAX_USER_INPUT_LENGTH:
+            logger.warning(f"⚠️ User input too long: {len(user_input)} chars (max: {MAX_USER_INPUT_LENGTH})")
+            return f"⚠️ Frågan är för lång. Max {MAX_USER_INPUT_LENGTH} tecken tillåts (du skrev {len(user_input)} tecken)."
+
+        # Sanitera input - ta bort potentiellt farliga tecken (behåll vanlig text)
+        user_input = user_input.strip()
+
         if not self.embedding_model:
              return "🚨 Internt fel: Embedding-modell ej laddad."
 
@@ -359,9 +412,14 @@ class RAGChatBot:
             doc_results = self._search_document_index(query_embedding, top_k=self.doc_search_top_k)
             if doc_results:
                 samlad_text_kontext, kallor_list, used_chunks_list = self._build_context_from_docs(doc_results)
+
+                # Validera att kontexten inte är för lång
+                if len(samlad_text_kontext) > MAX_CONTEXT_LENGTH:
+                    logger.warning(f"⚠️ Context too long ({len(samlad_text_kontext)} chars), truncating to {MAX_CONTEXT_LENGTH}")
+                    samlad_text_kontext = samlad_text_kontext[:MAX_CONTEXT_LENGTH] + "\n\n...[Kontext trunkerad p.g.a. längd]"
         else:
             logger.warning("Dokumentindex ej laddat. Försöker LLM utan RAG-kontext.")
-        
+
         prompt_for_llm = f"Kontext:\n{samlad_text_kontext or 'Ingen specifik kontext från dokument hittades.'}\n\nFråga: {user_input.strip()}\n\nSvar:"
         
         llm_generated_text = self._generate_with_lmstudio(prompt_for_llm)
@@ -408,9 +466,16 @@ class RAGChatBot:
              logger.debug("DBManager ej konfigurerad, kan ej spara chatlog.")
              return None
 
+        # Validera tabellnamn
+        try:
+            safe_table = self.db_manager._validate_identifier(self.chatlog_table_name, "table")
+        except (ValueError, AttributeError) as validation_err:
+            logger.error(f"❌ SQL table validation failed: {validation_err}")
+            return None
+
         embedding_bytes = question_embedding_arr.astype(np.float32).tobytes() if question_embedding_arr is not None else None
-        
-        sql = f'INSERT INTO "{self.chatlog_table_name}" (UserQuestion, BotResponse, UserQuestionEmbedding, CachedResponseID) VALUES (?, ?, ?, ?)'
+
+        sql = f'INSERT INTO "{safe_table}" (UserQuestion, BotResponse, UserQuestionEmbedding, CachedResponseID) VALUES (?, ?, ?, ?)'
         params = (question, response_text, embedding_bytes, cached_response_ref_id)
         
         try:

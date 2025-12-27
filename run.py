@@ -24,6 +24,14 @@ except ImportError:
     FLASK_AVAILABLE = False
     # Ingen kritisk exit här, kontrolleras senare om --serve-api används
 
+# --- Importera Rate Limiter ---
+try:
+    from utils.rate_limiter import SimpleRateLimiter, rate_limit
+    RATE_LIMITER_AVAILABLE = True
+except ImportError:
+    RATE_LIMITER_AVAILABLE = False
+    logging.warning("⚠️ Rate limiter not available. API will run without rate limiting.")
+
 # --- DB Connection String (initialiseras till None först) ---
 DB_CONNECTION_STRING: Optional[str] = None
 
@@ -250,14 +258,25 @@ def run_interactive_chat(args: argparse.Namespace, db_mngr: "DatabaseManager"):
 flask_app_instance: Optional["Flask"] = None
 api_bot_instance: Optional["RAGChatBot"] = None
 api_initialization_error: Optional[str] = None
+api_rate_limiter: Optional["SimpleRateLimiter"] = None
 
 def initialize_and_run_api_server(args: argparse.Namespace, db_mngr: "DatabaseManager"):
     """Initialiserar och startar Flask API-servern."""
-    global flask_app_instance, api_bot_instance, api_initialization_error
+    global flask_app_instance, api_bot_instance, api_initialization_error, api_rate_limiter
 
     if not FLASK_AVAILABLE:
         logger.critical("!!! Flask/Flask-CORS ej installerat. Installera med 'pip install Flask Flask-CORS'. Avslutar.")
         sys.exit(1)
+
+    # Initiera rate limiter
+    if RATE_LIMITER_AVAILABLE:
+        api_rate_limiter = SimpleRateLimiter(
+            max_requests=args.api_rate_limit,
+            window_seconds=60  # 60 sekunder fönster
+        )
+        logger.info(f"✅ Rate limiter aktiverad: {args.api_rate_limit} förfrågningar per minut")
+    else:
+        logger.warning("⚠️ Rate limiter ej tillgänglig. API körs utan rate limiting!")
 
     logger.info("Förbereder API-server. Initierar RAGChatBot för API...")
     try:
@@ -282,6 +301,7 @@ def initialize_and_run_api_server(args: argparse.Namespace, db_mngr: "DatabaseMa
     CORS(flask_app_instance)
 
     @flask_app_instance.route('/chat', methods=['POST'])
+    @rate_limit(api_rate_limiter) if RATE_LIMITER_AVAILABLE and api_rate_limiter else lambda f: f
     def chat_api_endpoint():
         if not api_bot_instance or api_initialization_error:
             err_msg = api_initialization_error or "Okänt uppstartsfel."
@@ -338,6 +358,7 @@ def main():
     parser.add_argument("--doc-top-k", type=int, default=1, help="Antal toppdokument-chunks att hämta för RAG. Default: 1")
     parser.add_argument("--serve-api", action="store_true", help="Startar Flask API-servern.")
     parser.add_argument("--api-port", type=int, default=5000, help="Port för Flask API-servern. Default: 5000")
+    parser.add_argument("--api-rate-limit", type=int, default=10, help="Max antal API-förfrågningar per minut per IP. Default: 10")
     parser.add_argument("--loglevel", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"], help="Sätt loggnivå. Default: INFO")
     args = parser.parse_args()
 

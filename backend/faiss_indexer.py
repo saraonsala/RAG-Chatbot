@@ -286,7 +286,16 @@ class FaissIndexer:
         logger.info(f"📥 Läser in chatlog-data från DB: '{self.chatlog_table}'...")
         chat_logs: List[Dict[str, Any]] = []
         try:
-            query = f'SELECT "{self.chatlog_id_col}", "{self.chatlog_question_col}" FROM "{self.chatlog_table}" WHERE "{self.chatlog_question_col}" IS NOT NULL AND LTRIM(RTRIM("{self.chatlog_question_col}")) <> \'\''
+            # Validera SQL-identifierare för att förhindra SQL injection
+            try:
+                safe_table = self.db_manager._validate_identifier(self.chatlog_table, "table")
+                safe_id_col = self.db_manager._validate_identifier(self.chatlog_id_col, "column")
+                safe_question_col = self.db_manager._validate_identifier(self.chatlog_question_col, "column")
+            except (ValueError, AttributeError) as validation_err:
+                logger.error(f"❌ SQL identifier validation failed: {validation_err}")
+                return []
+
+            query = f'SELECT "{safe_id_col}", "{safe_question_col}" FROM "{safe_table}" WHERE "{safe_question_col}" IS NOT NULL AND LTRIM(RTRIM("{safe_question_col}")) <> \'\''
             logger.debug(f"Exekverar SQL för chattloggar: {query}")
             
             rows = self.db_manager.fetch_many(query)

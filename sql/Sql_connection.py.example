@@ -1,0 +1,74 @@
+# sql/Sql_connection.py.example
+#
+# INSTRUKTIONER:
+# 1. Kopiera denna fil till "Sql_connection.py" (utan .example)
+# 2. Fyll i dina databaskonfigurationsvärden nedan
+# 3. Sql_connection.py är redan i .gitignore och kommer INTE committas
+#
+# ALTERNATIV: Använd miljövariabler istället (rekommenderas)
+# Skapa en .env fil baserad på .env.example
+
+import os
+from typing import Optional
+
+def get_connection_string_from_env() -> Optional[str]:
+    """
+    Konstruerar en anslutningssträng från miljövariabler.
+    Använd .env fil eller sätt systemvariabler.
+    """
+    driver = os.getenv('RAG_DB_DRIVER', 'ODBC Driver 17 for SQL Server')
+    server = os.getenv('RAG_DB_SERVER')
+    database = os.getenv('RAG_DB_DATABASE')
+    username = os.getenv('RAG_DB_USERNAME')
+    password = os.getenv('RAG_DB_PASSWORD')
+    trusted = os.getenv('RAG_DB_TRUSTED_CONNECTION', 'no').lower() in ('yes', 'true', '1')
+
+    if not server or not database:
+        return None
+
+    if trusted:
+        # Windows Authentication
+        return (
+            f"Driver={{{driver}}};"
+            f"Server={server};"
+            f"Database={database};"
+            f"Trusted_Connection=yes;"
+        )
+    elif username and password:
+        # SQL Server Authentication
+        return (
+            f"Driver={{{driver}}};"
+            f"Server={server};"
+            f"Database={database};"
+            f"Uid={username};"
+            f"Pwd={password};"
+        )
+
+    return None
+
+# Försök först läsa från miljövariabler
+DB_CONNECTION_STRING = get_connection_string_from_env()
+
+# Om inte miljövariabler är satta, använd hårdkodad sträng (mindre säkert)
+if not DB_CONNECTION_STRING:
+    # ALTERNATIV 1: Windows Authentication (Trusted Connection)
+    # Avkommentera och fyll i:
+    # DB_CONNECTION_STRING = (
+    #     r'Driver={ODBC Driver 17 for SQL Server};'
+    #     r'Server=DIN_SERVER;'
+    #     r'Database=DIN_DATABAS;'
+    #     r'Trusted_Connection=yes;'
+    # )
+
+    # ALTERNATIV 2: SQL Server Authentication
+    # Avkommentera och fyll i:
+    # DB_CONNECTION_STRING = (
+    #     r'Driver={ODBC Driver 17 for SQL Server};'
+    #     r'Server=DIN_SERVER;'
+    #     r'Database=DIN_DATABAS;'
+    #     r'Uid=DIN_ANVÄNDARE;'
+    #     r'Pwd=DITT_LÖSENORD;'
+    # )
+
+    # Om varken miljövariabler eller hårdkodad sträng finns, sätt till None
+    DB_CONNECTION_STRING = None

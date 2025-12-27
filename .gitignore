@@ -195,4 +195,22 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-Sql_connection.py
+# === RAG-Chatbot Project Specific ===
+
+# Project-specific output directories
+chunk_output/
+cleaned_output/
+rag_index_storage/
+anvandarhandbocker/*.pdf
+anvandarhandbocker/*.xlsx
+anvandarhandbocker/*.xls
+
+# Project-specific log files
+chatbot_pipeline_run.log
+rag_chatbot.log
+pdf_processor_standalone.log
+cleanup_manual_data.log
+
+# Test directories
+temp_pdf_processor_test/
+faiss_indexer_standalone_demo_output/

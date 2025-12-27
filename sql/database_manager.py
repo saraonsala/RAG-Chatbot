@@ -4,6 +4,13 @@ import pyodbc
 import logging
 from typing import Optional, List, Any, Tuple
 
+try:
+    from sql.sql_security import validate_table_name, validate_column_name, SQLSecurityError
+    SQL_SECURITY_AVAILABLE = True
+except ImportError:
+    SQL_SECURITY_AVAILABLE = False
+    logging.warning("⚠️ sql_security module not available. SQL validation disabled.")
+
 # --- Loggning Setup ---
 # Konfiguration (handlers, format, etc.) bör ske i applikationens entry point (t.ex. run.py).
 logger = logging.getLogger(__name__)
@@ -70,6 +77,39 @@ class DatabaseManager:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Avslutar kontexthanteraren, stänger anslutningen."""
         self.close()
+
+    def _validate_identifier(self, identifier: str, identifier_type: str = "identifier") -> str:
+        """
+        Validerar SQL-identifierare (tabell- eller kolumnnamn) för att förhindra SQL injection.
+
+        Args:
+            identifier: Namnet att validera
+            identifier_type: 'table' eller 'column'
+
+        Returns:
+            Validerad identifierare
+
+        Raises:
+            ValueError: Om identifieraren är ogiltig
+        """
+        if not SQL_SECURITY_AVAILABLE:
+            logger.warning(f"⚠️ SQL security validation unavailable for {identifier_type}: {identifier}")
+            return identifier
+
+        try:
+            if identifier_type == "table":
+                return validate_table_name(identifier, strict=True)
+            elif identifier_type == "column":
+                return validate_column_name(identifier, strict=True)
+            else:
+                # Fallback till generisk validering
+                import re
+                if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', identifier):
+                    raise ValueError(f"Invalid SQL identifier: {identifier}")
+                return identifier
+        except Exception as e:
+            logger.error(f"❌ SQL identifier validation failed for {identifier_type} '{identifier}': {e}")
+            raise ValueError(f"Invalid SQL {identifier_type} name: {identifier}") from e
 
     def _get_cursor(self) -> pyodbc.Cursor:
         """Hämtar en cursor från den aktiva anslutningen. Försöker återansluta vid behov."""
